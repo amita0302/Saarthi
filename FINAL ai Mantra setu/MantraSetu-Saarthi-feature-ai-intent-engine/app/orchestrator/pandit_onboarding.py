@@ -118,6 +118,7 @@ def structured_onboarding_directive(directive: dict, *, confidence: float = 0.95
     result.setdefault("target", None)
     result.setdefault("query", None)
     result.setdefault("active_field", None)
+    result.setdefault("fields", None)
     result["value"] = result.get("query")
     result["confidence"] = max(0.0, min(1.0, float(confidence)))
     result["recognition_status"] = recognition_status
@@ -195,6 +196,12 @@ def format_phone_for_speech(phone: str) -> str:
     if re.search(r'\d', str(phone)):
         return render_identifier_digits(phone)
     return phone
+
+
+def build_phone_confirmation_prompt(phone: str) -> str:
+    """Build confirmation question for phone number: 'Maine suna — [formatted_phone]. Kya ye sahi hai?'"""
+    formatted = format_phone_for_speech(phone)
+    return f"Maine suna — {formatted}. Kya ye sahi hai?"
 
 
 def format_email_for_speech(email: str) -> str:
@@ -371,6 +378,8 @@ def format_value_for_display(val: Any) -> str:
             return f"{', '.join(items[:-1])} aur {items[-1]}"
     elif isinstance(val, str):
         val_str = val.strip()
+        if re.match(r'^[6789]\d{9}$', val_str):
+            return format_phone_for_speech(val_str)
         if val_str.startswith("[") and val_str.endswith("]"):
             try:
                 import ast
@@ -716,17 +725,20 @@ def normalize_spoken_input(user_message: str, field: str) -> str:
         # 2. Extract digits only and strip spaces
         digits_only = re.sub(r'\D', '', text)
         
-        # 3. Strip country codes +91, 91, or leading 0 if 11 or 12 digits
+        # 3. Strip country codes +91, 91, leading 0, or STT leading duplicate digit if 11/12 digits
         if len(digits_only) == 11 and digits_only.startswith('0'):
             digits_only = digits_only[1:]
         elif len(digits_only) == 12 and digits_only.startswith('91'):
             digits_only = digits_only[2:]
+        elif len(digits_only) == 11 and digits_only[0] == digits_only[1] and digits_only[1] in '6789':
+            logger.info("[PHONE-GUARD] Normalizing STT duplicate leading digit in normalize_spoken_input: %s -> %s", digits_only, digits_only[1:])
+            digits_only = digits_only[1:]
             
-        # 4. Find 10-digit Indian mobile number starting with 5-9
-        if len(digits_only) == 10 and re.match(r'^[56789]', digits_only):
+        # 4. Find 10-digit Indian mobile number starting with 6-9
+        if len(digits_only) == 10 and re.match(r'^[6789]', digits_only):
             text = digits_only
         else:
-            phone_match = re.search(r'\b[56789]\d{9}\b', text)
+            phone_match = re.search(r'\b[6789]\d{9}\b', text)
             if phone_match:
                 text = phone_match.group(0)
             else:
@@ -962,6 +974,9 @@ async def extract_field_value(user_message: str, field: str, ai_service: AIServi
             digits_only = digits_only[1:]
         elif len(digits_only) == 12 and digits_only.startswith('91'):
             digits_only = digits_only[2:]
+        elif len(digits_only) == 11 and digits_only[0] == digits_only[1] and digits_only[1] in '6789':
+            logger.info("[PHONE-GUARD] Detected STT leading-digit duplication in %s -> %s", digits_only, digits_only[1:])
+            digits_only = digits_only[1:]
             
         if len(digits_only) == 10 and re.match(r'^[6789]', digits_only):
             logger.info("[PANDIT-ONBOARDING] Deterministic regex hit for pandit-phone: %s", digits_only)
@@ -1007,13 +1022,13 @@ async def extract_field_value(user_message: str, field: str, ai_service: AIServi
             'वैदिक अनुष्ठान (Vedic Rituals)': ['vedic anushthan', 'vedic anusthan', 'anushthan', 'anusthan', 'vedic karmakand', 'karmakand', 'purohit', 'vedic rituals', 'vedic ritual', 'वैदिक अनुष्ठान', 'अनुष्ठान', 'कर्मकांड'],
             'ज्योतिष (Astrology)': ['jyotish', 'jyotishi', 'kundali', 'kundli', 'kundali milan', 'rashifal', 'horoscope', 'grah', 'astrology', 'astrologer', 'ज्योतिष', 'ज्योतिषी', 'कुंडली', 'कुण्डली', 'राशिफल', 'ग्रह'],
             'विवाह संस्कार (Marriage Ceremonies)': ['vivah sanskar', 'vivah', 'shadi', 'shaadi', 'lagan', 'marriage ceremonies', 'marriage ceremony', 'wedding ceremony', 'wedding', 'marriage', 'विवाह संस्कार', 'विवाह', 'शादी', 'लगन'],
-            'गृह प्रवेश (House Warming)': ['griha pravesh', 'grih pravesh', 'grah pravesh', 'grihapravesh', 'ghar pravesh', 'house warming', 'housewarming', 'गृह प्रवेश', 'गृहप्रवेश', 'घर प्रवेश'],
-            'नामकरण (Naming Ceremony)': ['namkaran', 'naamkaran', 'namakaran', 'naming ceremony', 'naming', 'नामकरण'],
+            'गृह प्रवेश (House Warming)': ['griha pravesh', 'grih pravesh', 'grah pravesh', 'grihapravesh', 'ghar pravesh', 'house warming', 'housewarming', 'vastu shanti', 'vastu puja', 'गृह प्रवेश', 'गृहप्रवेश', 'घर प्रवेश', 'वास्तु शांति', 'वास्तु पूजा'],
+            'नामकरण (Naming Ceremony)': ['namkaran', 'naamkaran', 'namakaran', 'naam karan', 'nam karan', 'naming ceremony', 'naming', 'naamkaran sanskar', 'namkaran sanskar', 'नामकरण'],
             'अन्नप्राशन (First Feeding)': ['annaprashan', 'annaprashana', 'first feeding', 'baby feeding', 'अन्नप्राशन'],
             'मुंडन (Hair Cutting)': ['mundan', 'chudakarana', 'hair cutting', 'tonsure', 'मुंडन', 'चूड़ाकर्म'],
             'यज्ञ (Yajna)': ['yajna', 'yagya', 'yagy', 'mahayagya', 'fire sacrifice', 'यज्ञ', 'महायज्ञ'],
-            'पूजा (Puja)': ['puja', 'pooja', 'pujan', 'vidhi vidhan', 'worship', 'पूजा', 'पूजन'],
-            'हवन (Havan)': ['havan', 'hawan', 'homam', 'homa', 'fire ritual', 'हवन', 'होम'],
+            'पूजा (Puja)': ['puja', 'pooja', 'pujan', 'vidhi vidhan', 'worship', 'puja path', 'pooja path', 'पूजा', 'पूजन', 'पूजा पाठ'],
+            'हवन (Havan)': ['havan', 'hawan', 'homam', 'homa', 'fire ritual', 'yagya havan', 'havan yagya', 'हवन', 'होम', 'हवन यज्ञ'],
             'संस्कार (Sanskar)': ['sanskar', 'samskara', 'upanayan', 'janeu', 'sacraments', 'sacrament', 'संस्कार', 'उपनयन', 'जनेऊ'],
             'व्रत (Vrat)': ['vrat', 'upvas', 'fasting', 'व्रत', 'उपवास'],
             'Rudrabhishek & Mahamrityunjaya': ['rudrabhishek', 'rudra abhishek', 'mahamrityunjaya', 'mahamrityunjay', 'shiv puja', 'रुद्राभिषेक', 'महामृत्युंजय'],
@@ -1264,13 +1279,19 @@ def _validate_phone(val: str, params: dict) -> FieldValidationResult:
         digits = digits[1:]
     elif len(digits) == 12 and digits.startswith('91'):
         digits = digits[2:]
+    elif len(digits) == 11 and digits[0] == digits[1] and digits[1] in '6789':
+        logger.info("[PHONE-GUARD] Normalizing STT duplicate leading digit in validator: %s -> %s", digits, digits[1:])
+        digits = digits[1:]
     if len(digits) == 10 and re.match(r'^[6789]', digits):
         logger.info("[TELEMETRY-ONBOARDING] FIELD_ACCEPTED: field=pandit-phone | val=%s", digits)
         return FieldValidationResult(True, cleaned_value=digits)
     formatted = format_phone_for_speech(digits) if digits else ""
     if digits:
         logger.warning("[TELEMETRY-ONBOARDING] FIELD_REJECTED: field=pandit-phone | reason=invalid_format_digits | val=%s", digits)
-        err = f"Maine suna: '{formatted}', lekin mobile number 10 digits ka hona chahiye. Kripya apna 10-digit mobile number dobara bataiye."
+        if len(digits) == 10 and not re.match(r'^[6789]', digits):
+            err = f"Maine suna: '{formatted}', lekin mobile number 6, 7, 8 ya 9 se shuru hona chahiye. Kripya valid 10-digit mobile number bataiye."
+        else:
+            err = f"Maine suna: '{formatted}', lekin mobile number 10 digits ka hona chahiye. Kripya apna 10-digit mobile number dobara bataiye."
     else:
         logger.warning("[TELEMETRY-ONBOARDING] FIELD_REJECTED: field=pandit-phone | reason=no_digits_found | val=%s", val)
         err = "Maaf kijiye, valid 10-digit mobile number nahi mila. Kripya apna 10-digit mobile number dobara bataiye."
@@ -1353,6 +1374,8 @@ register_field_validator("pandit-availability", _make_choice_validator(["Offline
 def _make_multi_choice_validator(choices: list[str], label: str) -> Callable[[str, dict], FieldValidationResult]:
     def validator(val: str, params: dict) -> FieldValidationResult:
         if not val or val == "INVALID":
+            if label == "specialization":
+                return FieldValidationResult(False, error_message="Maaf kijiye, main aapki specialization samajh nahi paya. Jaise Vivah, Griha Pravesh, Puja, ya Havan — kripya dobara bataiye.")
             return FieldValidationResult(False, error_message=f"Kripya valid {label} dobara bataiye.")
         parts = [p.strip() for p in val.split(",") if p.strip()]
         valid_matches = []
@@ -1602,20 +1625,39 @@ async def process_onboarding_step(
     idx = state.get("current_field_index", 0)
     current_field_candidate = client_active_field or (fields[idx] if idx < len(fields) else None)
     is_free_text_field = current_field_candidate in ["pandit-bio", "bio", "pandit-achievements", "achievements"]
+    is_spec_field = current_field_candidate in ["pandit-spec", "spec", "specialization", "pandit-specialization"]
+    is_service_area_field = current_field_candidate in ["pandit-service-areas", "service-areas", "service_areas", "pandit-service_areas"]
+    is_choice_field = is_spec_field or is_service_area_field or current_field_candidate in ["pandit-languages", "languages", "lang", "pandit-availability", "availability", "pandit-gender", "gender"]
 
     # Check if user is attempting to navigate away mid-onboarding
     from app.orchestrator.navigation_intent_detector import is_navigation_command, resolve_navigation_target
     msg_lower = (request.user_message or "").lower().strip()
-    is_service_area_or_spec = any(sa in msg_lower for sa in ["online puja", "vedic puja", "puja area", "puja services"])
     
+    spec_keywords = [
+        "vedic anushthan", "anushthan", "karmakand", "jyotish", "kundali", "kundli", "rashifal",
+        "vivah", "shadi", "shaadi", "lagan", "griha pravesh", "grih pravesh", "ghar pravesh",
+        "house warming", "housewarming", "namkaran", "naamkaran", "annaprashan", "mundan",
+        "yajna", "yagya", "puja", "pooja", "havan", "hawan", "homam", "sanskar", "vrat",
+        "rudrabhishek", "mahamrityunjaya", "navgraha", "satyanarayan", "shodasha",
+        "वैदिक अनुष्ठान", "अनुष्ठान", "कर्मकांड", "ज्योतिष", "कुंडली", "राशिफल", "विवाह",
+        "शादी", "गृह प्रवेश", "नामकरण", "अन्नप्राशन", "मुंडन", "यज्ञ", "पूजा", "हवन", "संस्कार",
+        "व्रत", "रुद्राभिषेक", "महामृत्युंजय", "नवग्रह", "सत्यनारायण"
+    ]
+    has_spec_keyword = any(sk in msg_lower for sk in spec_keywords)
+
     unambiguous_exit_cmds = {
         "go back", "wapas jao", "wapas jao ji", "cancel", "cancel karo",
-        "exit", "quit", "stop", "chhod do", "form chhod do", "leave", "band karo"
+        "exit", "quit", "stop", "chhod do", "form chhod do", "leave", "band karo",
+        "abort", "mujhe bahar jana hai", "form band karo",
+        "कैंसल", "रुकिए", "रुको", "छोड़ दो", "बाहर जाओ", "वापस जाओ", "बंद करो"
     }
-    is_explicit_exit = msg_lower in unambiguous_exit_cmds
+    is_explicit_exit = msg_lower in unambiguous_exit_cmds or any(msg_lower == cmd for cmd in unambiguous_exit_cmds)
 
-    # Free-text narrative fields must NOT trigger generic navigation commands on descriptive sentences
-    should_check_navigation = not is_service_area_or_spec and (is_explicit_exit if is_free_text_field else is_navigation_command(request.user_message))
+    # Choice, specialization, and free-text fields must NOT trigger generic navigation commands on descriptive sentences or option keywords
+    if is_free_text_field or is_choice_field or has_spec_keyword:
+        should_check_navigation = is_explicit_exit
+    else:
+        should_check_navigation = is_explicit_exit or is_navigation_command(request.user_message)
 
     if should_check_navigation:
         nav_res = resolve_navigation_target(request.user_message)
@@ -1814,10 +1856,24 @@ async def process_onboarding_step(
                 old_tentative = state.get("tentative_value", "")
                 logger.info(f"[TENTATIVE] old='{old_tentative}' new='{cleaned_new_val}'")
                 state["tentative_value"] = cleaned_new_val
-                disp_val = format_value_for_display(cleaned_new_val)
-                question = f"Maine suna — {disp_val}. Kya ye sahi hai?"
+                if tentative_field == "pandit-phone":
+                    question = build_phone_confirmation_prompt(cleaned_new_val)
+                elif tentative_field in ["pandit-bio", "bio"]:
+                    question = f"Maine suna — '{cleaned_new_val}'. Kya ye sahi hai?"
+                else:
+                    disp_val = format_value_for_display(cleaned_new_val)
+                    question = f"Maine suna — {disp_val}. Kya ye sahi hai?"
 
-                nav_directive = {"action": "FILL_FORM", "target": tentative_field, "query": cleaned_new_val, "active_field": tentative_field, "intent": "PANDIT_ONBOARDING"}
+                fields_payload = None
+                if tentative_field in ["pandit-spec", "pandit-languages", "pandit-service-areas"]:
+                    spec_list = cleaned_new_val if isinstance(cleaned_new_val, list) else [s.strip() for s in str(cleaned_new_val).split(",") if s.strip()]
+                    fields_payload = [{"target": tentative_field, "query": item} for item in spec_list]
+                elif tentative_field in ["pandit-bio", "bio"]:
+                    fields_payload = [{"target": tentative_field, "query": cleaned_new_val}]
+
+                query_val = ", ".join(cleaned_new_val) if isinstance(cleaned_new_val, list) else cleaned_new_val
+                nav_directive = {"action": "FILL_FORM", "target": tentative_field, "query": query_val, "active_field": tentative_field, "intent": "PANDIT_ONBOARDING", "fields": fields_payload}
+                nav_directive = structured_onboarding_directive(nav_directive)
                 orchestrator._frontend_bridge.publish_navigation_event(request.session_id, nav_directive)
                 return orchestrator._response_builder.build_response(
                     request_id=request.request_id,
@@ -1829,8 +1885,13 @@ async def process_onboarding_step(
 
             # Preserve tentative field, value, and status when STT is empty, noisy, or unrecognized
             logger.info("[PANDIT-ONBOARDING] Unrecognized input during confirmation for field %s. Re-prompting while preserving state.", tentative_field)
-            disp_val = format_value_for_display(tentative_value)
-            question = f"Maaf kijiye, main samajh nahi paya. Maine suna — {disp_val}. Kya ye sahi hai?"
+            if tentative_field == "pandit-phone":
+                question = f"Maaf kijiye, main samajh nahi paya. {build_phone_confirmation_prompt(tentative_value)}"
+            elif tentative_field in ["pandit-bio", "bio"]:
+                question = f"Maaf kijiye, main samajh nahi paya. Maine suna — '{tentative_value}'. Kya ye sahi hai?"
+            else:
+                disp_val = format_value_for_display(tentative_value)
+                question = f"Maaf kijiye, main samajh nahi paya. Maine suna — {disp_val}. Kya ye sahi hai?"
             nav_directive = {"action": "FILL_FORM", "target": tentative_field, "query": tentative_value, "active_field": tentative_field, "intent": "PANDIT_ONBOARDING"}
             return orchestrator._response_builder.build_response(
                 request_id=request.request_id,
@@ -2431,7 +2492,16 @@ async def process_onboarding_step(
         # Check for navigation intent fallback ONLY after validation fails
         from app.orchestrator.navigation_intent_detector import is_navigation_command, resolve_navigation_target
         is_free_text = current_field in ["pandit-bio", "bio", "pandit-achievements", "achievements"]
-        if not is_free_text and is_navigation_command(request.user_message):
+        is_choice_or_spec = current_field in ["pandit-spec", "spec", "specialization", "pandit-service-areas", "service-areas", "pandit-languages", "languages"]
+        unambiguous_exit_cmds = {
+            "go back", "wapas jao", "wapas jao ji", "cancel", "cancel karo",
+            "exit", "quit", "stop", "chhod do", "form chhod do", "leave", "band karo",
+            "abort", "mujhe bahar jana hai", "form band karo",
+            "कैंसल", "रुकिए", "रुको", "छोड़ दो", "बाहर जाओ", "वापस जाओ", "बंद करो"
+        }
+        is_explicit_exit = (request.user_message or "").lower().strip() in unambiguous_exit_cmds
+
+        if not is_free_text and not is_choice_or_spec and (is_explicit_exit or is_navigation_command(request.user_message)):
             nav_result = resolve_navigation_target(request.user_message)
             if nav_result["needs_clarification"]:
                 return orchestrator._response_builder.build_response(
@@ -2451,6 +2521,9 @@ async def process_onboarding_step(
                     navigation_directive={"action": None, "target": None, "query": None, "active_field": None, "intent": "NAVIGATE_CONFIRMATION"},
                     metadata=ResponseMetadata(fast_path=True, latency_ms=0.0)
                 )
+
+        if current_field in ["pandit-spec", "spec", "specialization"] and (not err_msg or "samajh nahi paya" in err_msg):
+            err_msg = "Maaf kijiye, main aapki specialization samajh nahi paya. Jaise Vivah, Griha Pravesh, Puja, ya Havan — kripya dobara bataiye."
 
         nav_directive = {"action": "FILL_FORM", "target": current_field, "query": None, "active_field": current_field, "intent": "PANDIT_ONBOARDING", "fields": None}
         return orchestrator._response_builder.build_response(
@@ -2575,8 +2648,8 @@ async def process_onboarding_step(
             )
 
     # Direct commit and advance for manual input (keyboard typing / pill click / file upload)
-    # or confirmation-only fields (file uploads) or free-text narrative fields (pandit-bio)
-    if user_params.get("source") == "manual_input" or current_field in ["pandit-certFile", "pandit-aadhaarFile", "pandit-galleryFiles", "pandit-bio"]:
+    # or confirmation-only fields (file uploads)
+    if user_params.get("source") == "manual_input" or current_field in ["pandit-certFile", "pandit-aadhaarFile", "pandit-galleryFiles"]:
         state["collected_data"][current_field] = val
         state["status"] = "collecting"
         state["tentative_field"] = None
@@ -2595,11 +2668,6 @@ async def process_onboarding_step(
             )
             question = f"Bahut badhiya! {next_prompt}"
             fields_payload = None
-            if current_field in ["pandit-bio", "bio"]:
-                fields_payload = [
-                    {"target": current_field, "query": val},
-                    {"target": next_field, "query": None}
-                ]
             nav_directive = {
                 "action": "FILL_FORM",
                 "target": next_field,
@@ -2635,15 +2703,29 @@ async def process_onboarding_step(
     state["tentative_value"] = val
     state["status"] = "awaiting_field_confirmation"
 
-    disp_val = format_value_for_display(val)
-    question = f"Maine suna — {disp_val}. Kya ye sahi hai?"
+    if current_field == "pandit-phone":
+        question = build_phone_confirmation_prompt(val)
+    elif current_field in ["pandit-bio", "bio"]:
+        question = f"Maine suna — '{val}'. Kya ye sahi hai?"
+    else:
+        disp_val = format_value_for_display(val)
+        question = f"Maine suna — {disp_val}. Kya ye sahi hai?"
+
+    fields_payload = None
+    if current_field in ["pandit-spec", "pandit-languages", "pandit-service-areas"]:
+        spec_list = val if isinstance(val, list) else [s.strip() for s in str(val).split(",") if s.strip()]
+        fields_payload = [{"target": current_field, "query": item} for item in spec_list]
+    elif current_field in ["pandit-bio", "bio"]:
+        fields_payload = [{"target": current_field, "query": val}]
+
+    query_val = ", ".join(val) if isinstance(val, list) else val
     nav_directive = {
         "action": "FILL_FORM",
         "target": current_field,
-        "query": val,
+        "query": query_val,
         "active_field": current_field,
         "intent": "PANDIT_ONBOARDING",
-        "fields": None,
+        "fields": fields_payload,
         "allow_manual_edit": True,
         "suggest_keyboard": current_field in ["pandit-first-name", "pandit-last-name", "pandit-name"]
     }

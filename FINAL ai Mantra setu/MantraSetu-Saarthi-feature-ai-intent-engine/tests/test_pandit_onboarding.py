@@ -637,9 +637,9 @@ class TestPanditOnboardingStateMachine(IsolatedAsyncioTestCase):
         self.assertFalse(r_bad.is_valid)
 
         # 5. pandit-spec — multi-choice fuzzy match
-        r = registry["pandit-spec"]("Vedic Puja", {})
+        r = registry["pandit-spec"]("ज्योतिष", {})
         self.assertTrue(r.is_valid)
-        self.assertIn("Vedic Pujas & Havan", r.cleaned_value)
+        self.assertIn("ज्योतिष (Astrology)", r.cleaned_value)
         r_bad = registry["pandit-spec"]("Unknown Specialty", {})
         self.assertFalse(r_bad.is_valid)
 

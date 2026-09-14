@@ -217,7 +217,10 @@ export function getFormStateData(): Record<string, string> {
       data['pandit-spec'] = specEl.value.trim();
       data['specialization'] = specEl.value.trim();
     }
-    if (bioEl?.value) data['pandit-bio'] = bioEl.value.trim();
+    if (bioEl?.value) {
+      data['pandit-bio'] = bioEl.value.trim();
+      data['bio'] = bioEl.value.trim();
+    }
 
     // Password security: send flags only, never raw string
     data['pandit-password_filled'] = (pwdEl && pwdEl.value && pwdEl.value.trim().length > 0) ? 'true' : 'false';
@@ -311,6 +314,7 @@ export function useSaarthiVoice() {
   const isRateLimitedRef = useRef<boolean>(false);
   const hasAnnouncedRateLimitRef = useRef<boolean>(false);
   const lastHighlightedFieldRef = useRef<string | null>(null);
+  const activeFieldRef = useRef<string | null>(null);
   const isNavigatingRef = useRef<boolean>(false);
   // Tracks fields the user has manually interacted with (typed/clicked) during this active voice session
   const userEditedFieldsRef = useRef<Set<string>>(new Set());
@@ -486,20 +490,38 @@ export function useSaarthiVoice() {
         });
     }
 
-    (window as any).simulateUserSpeech = (text: string) => {
+    (window as any).simulateUserSpeech = (text: string, customField?: string) => {
       console.log(`[DEBUG-SIMULATION] Simulating user speech: "${text}"`);
+      console.log('[Voice] TRANSCRIPT final', text);
+      const reqId = generateUUID();
+      activeRequestIdRef.current = reqId;
+      currentRequestIdRef.current = reqId;
+      const targetField = customField || activeFieldRef.current || 'pandit-spec';
+      activeFieldRef.current = targetField;
+      stateRef.current = 'thinking';
+      setSaarthiState('thinking');
       sendWsMessage({
         type: 'TEXT',
+        request_id: reqId,
         payload: {
           text: text,
-          language: 'hi'
+          language: 'hi',
+          current_page: window.location.pathname + window.location.search,
+          active_field: targetField,
+          dom_form_data: getFormStateData(),
+          user_edited_fields: Array.from(userEditedFieldsRef.current),
+          user_parameters: {
+            active_field: targetField,
+            field: targetField,
+          }
         }
       });
     };
+
     return () => {
       delete (window as any).simulateUserSpeech;
     };
-  }, [sendWsMessage]);
+  }, [sendWsMessage, setSaarthiState]);
 
 
   const playNextAudioRef = useRef<(() => void) | undefined>(undefined);
@@ -515,7 +537,6 @@ export function useSaarthiVoice() {
   const sequenceQueueRef = useRef<any[]>([]);
   const isExecutingSequenceRef = useRef(false);
   const lastTargetRef = useRef<string | null>(null);
-  const activeFieldRef = useRef<string | null>(null);
   const audioBytesAccumulatorRef = useRef<Uint8Array[]>([]);
 
   // ── FIX: Gapless Sequential Scheduler & Byte-Alignment Refs ──
@@ -1168,7 +1189,7 @@ export function useSaarthiVoice() {
          if (step.target && step.target.includes('email')) {
            rawText = convertSpokenEmailToText(rawText);
          }
-         const fullText = ensureRomanText(rawText);
+         const fullText = (step.target && (step.target.includes('bio') || step.target.includes('achieve'))) ? rawText : ensureRomanText(rawText);
 
          const charDelay = Math.min(60, Math.max(30, 1200 / fullText.length)); // 30-60ms per char, total ~1-2s
          let charIndex = 0;
@@ -1192,6 +1213,9 @@ export function useSaarthiVoice() {
               targetEl.dispatchEvent(new Event('input', { bubbles: true }));
               targetEl.dispatchEvent(new Event('change', { bubbles: true }));
               console.log(`[FORM-FILL-PROOF] Final Char-by-char typing complete for target="${step.target}" | Final DOM Value="${(targetEl as HTMLInputElement).value}"`);
+              if (step.target === 'pandit-bio' || (targetEl as HTMLElement).id === 'pandit-bio') {
+                console.log(`[BIO-FIDELITY-PROOF] Target: "${step.target}" | Final DOM Value: "${(targetEl as HTMLInputElement).value}"`);
+              }
               isSaarthiTypingRef.current = false;
               lastSaarthiTypingEndTimeRef.current = Date.now();
               setTimeout(processNextStep, step.delay || 400);
@@ -1318,6 +1342,12 @@ export function useSaarthiVoice() {
     console.log('[Voice] Opening WebSocket connection to:', wsUrl.replace(/ticket=[^&]+/, 'ticket=[PROTECTED]'));
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+    (window as any).__saarthiWs = ws;
+    (window as any).__saarthiDispatchMsg = (msg: any) => {
+      if (ws.onmessage) {
+        ws.onmessage(new MessageEvent('message', { data: JSON.stringify(msg) }));
+      }
+    };
 
     ws.onopen = () => {
       console.log('[Voice] WebSocket Connected successfully.');
@@ -1422,8 +1452,9 @@ export function useSaarthiVoice() {
 
           // ----------- TRANSCRIPT handling -----------------------------------
           if (msg.type === 'TRANSCRIPT') {
-            const { text, is_final } = msg.payload as { text: string; is_final: boolean };
+            const { text, is_final, stt_language, stt_provider } = msg.payload as { text: string; is_final: boolean; stt_language?: string; stt_provider?: string };
             console.log('[Voice] TRANSCRIPT', is_final ? 'final' : 'partial', text);
+            console.log(`[TRANSCRIPT-DIAGNOSTIC] Text: "${text}" | Language: ${stt_language || 'unknown'} | Provider: ${stt_provider || 'inworld'}`);
             // Bug 2 Fix: Do not render live user transcript in dialogue bubble
             // setDialogueText(text);
             
@@ -1461,6 +1492,10 @@ export function useSaarthiVoice() {
               updateSessionReady(true);
             }
             console.log('[Voice] [CONNECT-DIAGNOSTIC] RAW AI_RESPONSE Received:', JSON.stringify(msg.payload));
+            if (msg.payload?.active_field === 'pandit-bio' || msg.payload?.target === 'pandit-bio' || activeFieldRef.current === 'pandit-bio') {
+              console.log('[BIO-TRACE] Full AI_RESPONSE payload for bio:', JSON.stringify(msg.payload));
+              console.log(`[BIO-FIDELITY-DIAGNOSTIC] active_field="${msg.payload?.active_field || activeFieldRef.current}" | query="${msg.payload?.query || ''}" | language="${msg.payload?.stt_language || 'unknown'}"`);
+            }
             let contentStr = msg.payload.content || '';
             
             let action = msg.payload.action || (msg.payload.navigation_directive && msg.payload.navigation_directive.action) || null;
@@ -1552,6 +1587,8 @@ export function useSaarthiVoice() {
                       highlightSelector = isPanditField ? '[data-testid="input-pandit-state"]' : '[data-testid="input-state"]';
                     } else if (activeField.includes('exp')) {
                       highlightSelector = '[data-testid="input-pandit-exp"], #pandit-exp, [data-testid="select-pandit-exp"]';
+                    } else if (activeField === 'pandit-bio' || activeField.includes('bio')) {
+                      highlightSelector = '#pandit-bio, [data-testid="textarea-pandit-bio"]';
                     } else {
                       highlightSelector = `#${activeField}, [data-testid="input-${activeField}"], [data-testid="select-${activeField}"]`;
                     }
@@ -1904,6 +1941,10 @@ export function useSaarthiVoice() {
                 else selector = `input[name="${fTarget}"], #${fTarget}`;
                 
                 console.log(`[FORM-FILL] Processing field ${fTarget} -> selector: ${selector}`);
+                if (fTarget.includes('bio')) {
+                  const bioElCheck = document.querySelector(selector);
+                  console.log(`[BIO-TRACE] Selector="${selector}" | MatchSuccess=${!!bioElCheck} | ElementTag=${bioElCheck?.tagName} | CurrentValue="${(bioElCheck as HTMLTextAreaElement)?.value || ''}"`);
+                }
 
                 const isPanditAlreadyActive = hasSelectedPanditTabRef.current ||
                   window.location.search.includes('role=pandit') ||
@@ -3209,7 +3250,11 @@ export function useSaarthiVoice() {
             }
 
             audioEndSent = true;
-            console.log('[AUDIO-END-SENT] Dispatching AUDIO_END for field:', activeFieldRef.current, 'recorded_bytes:', userRecordedBytesRef.current, 'silenceThreshold:', silenceThreshold);
+            const currentDomFormData = getFormStateData();
+            console.log('[AUDIO-END-SENT] Dispatching AUDIO_END for field:', activeFieldRef.current, 'recorded_bytes:', userRecordedBytesRef.current, 'silenceThreshold:', silenceThreshold, 'bioKeys:', {
+              'pandit-bio': currentDomFormData['pandit-bio'],
+              'bio': currentDomFormData['bio']
+            });
 
             currentRequestIdRef.current = generateUUID();
             activeRequestIdRef.current = currentRequestIdRef.current;
@@ -3219,7 +3264,7 @@ export function useSaarthiVoice() {
               payload: {
                 current_page: window.location.pathname + window.location.search,
                 active_field: activeFieldRef.current,
-                dom_form_data: getFormStateData(),
+                dom_form_data: currentDomFormData,
                 user_edited_fields: Array.from(userEditedFieldsRef.current),
               }
             });

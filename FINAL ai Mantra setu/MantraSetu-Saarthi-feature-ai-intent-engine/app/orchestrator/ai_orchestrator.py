@@ -393,11 +393,50 @@ class AIOrchestrator:
                 session.pending_nav_target = None
                 logger.info("[NAVIGATION] Safety net: Cleared pending_nav_target because user said something unrelated.")
 
-        # -- NAVIGATION INTENT DETECTION --
+        # 3.5 Fallback Auto-Init for Pandit Onboarding (Runs before navigation detection to prevent false navigation hijacking)
+        page_str = sanitized_req.current_page or ""
+        msg_lower_check = sanitized_req.user_message.strip().lower()
+        is_explicit_signup = any(w in msg_lower_check for w in ["register", "signup", "sign up", "onboard", "roop mein", "banna hai", "onboarding"])
         onboarding_state = getattr(session, "onboarding_state", None)
+
+        if (not onboarding_state or not onboarding_state.get("active")) and ("/signup" in page_str or "pandit" in page_str) and not is_explicit_signup:
+            session.onboarding_state = {
+                "active": True,
+                "current_field_index": 0,
+                "collected_data": {},
+                "fields": [
+                    "pandit-avatar",
+                    "pandit-first-name",
+                    "pandit-last-name",
+                    "pandit-email",
+                    "pandit-phone",
+                    "pandit-gender",
+                    "pandit-availability",
+                    "pandit-city",
+                    "pandit-state",
+                    "pandit-service-areas",
+                    "pandit-exp",
+                    "pandit-gurukul",
+                    "pandit-languages",
+                    "pandit-spec",
+                    "pandit-achievements",
+                    "pandit-bio",
+                    "pandit-certFile",
+                    "pandit-aadhaarFile",
+                    "pandit-galleryFiles",
+                    "pandit-password",
+                    "pandit-confirm"
+                ]
+            }
+            onboarding_state = session.onboarding_state
+            logger.info("[PANDIT-ONBOARDING] Auto-initialized state because user is on signup page with implicit input.")
+
+        # -- NAVIGATION INTENT DETECTION --
         is_active_onboarding = onboarding_state and onboarding_state.get("active")
+        is_on_signup_page = "/signup" in page_str or "pandit" in page_str
+        has_client_field = bool(sanitized_req.user_parameters.get("active_field") or sanitized_req.user_parameters.get("field"))
         
-        if not is_active_onboarding and is_navigation_command(sanitized_req.user_message) and not getattr(session, "pending_pandit_clarification", False) and not getattr(session, "pending_tour_clarification", False):
+        if not is_active_onboarding and not is_on_signup_page and not has_client_field and is_navigation_command(sanitized_req.user_message) and not getattr(session, "pending_pandit_clarification", False) and not getattr(session, "pending_tour_clarification", False):
             nav_result = resolve_navigation_target(sanitized_req.user_message)
             if nav_result["needs_clarification"]:
                 msg_clean_check = sanitized_req.user_message.lower()
@@ -497,43 +536,6 @@ class AIOrchestrator:
 
         # Check if we are currently in an active onboarding session
         onboarding_state = getattr(session, "onboarding_state", None)
-
-        # 3.5 Fallback Auto-Init for Pandit Onboarding (Moved back to top with explicit signup guard)
-        page_str = sanitized_req.current_page or ""
-        msg_lower_check = sanitized_req.user_message.strip().lower()
-        is_explicit_signup = any(w in msg_lower_check for w in ["register", "signup", "sign up", "onboard", "roop mein", "banna hai", "onboarding"])
-        
-        if (not onboarding_state or not onboarding_state.get("active")) and ("/signup" in page_str or "pandit" in page_str) and not is_explicit_signup:
-            session.onboarding_state = {
-                "active": True,
-                "current_field_index": 0,
-                "collected_data": {},
-                "fields": [
-                    "pandit-avatar",
-                    "pandit-first-name",
-                    "pandit-last-name",
-                    "pandit-email",
-                    "pandit-phone",
-                    "pandit-gender",
-                    "pandit-availability",
-                    "pandit-city",
-                    "pandit-state",
-                    "pandit-service-areas",
-                    "pandit-exp",
-                    "pandit-gurukul",
-                    "pandit-languages",
-                    "pandit-spec",
-                    "pandit-achievements",
-                    "pandit-bio",
-                    "pandit-certFile",
-                    "pandit-aadhaarFile",
-                    "pandit-galleryFiles",
-                    "pandit-password",
-                    "pandit-confirm"
-                ]
-            }
-            onboarding_state = session.onboarding_state
-            logger.info("[PANDIT-ONBOARDING] Auto-initialized state because user is on signup page with implicit input.")
 
         if onboarding_state and onboarding_state.get("active"):
             breakout_phrases = ["cancel", "ruko", "stop", "exit", "chhod do", "cancel kardo", "mujhe kuch aur karna hai", "abort", "कैंसल", "रुकिए", "रुको", "छोड़ दो"]

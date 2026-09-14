@@ -171,16 +171,29 @@ class InWorldSTTAdapter(ISpeechRecognizer):
             }
             ALPHANUMERIC_FIELDS = NAME_FIELDS | EMAIL_FIELDS
 
+            # Free-text description fields: Users may speak in English, Hindi, or Hinglish.
+            # Using 'en-IN' ensures Inworld STT preserves English speech in Latin English text,
+            # and preserves Hindi speech in Devanagari Hindi text, preventing forced Devanagari
+            # phonetic transliteration of English bio descriptions.
+            FREE_TEXT_FIELDS = {
+                "pandit-bio", "bio",
+                "pandit-achievements", "achievements",
+                "pandit-gurukul", "gurukul", "education"
+            }
+
             active_field = (
                 session.context_data.get("client_active_field")
                 or session.context_data.get("onboarding_active_field")
                 or ""
             )
             is_alphanumeric_field = active_field in ALPHANUMERIC_FIELDS
-            lang_code = "en-IN" if is_alphanumeric_field else (session.language or "hi-IN")
+            is_free_text_field = active_field in FREE_TEXT_FIELDS
+            is_bilingual_field = is_alphanumeric_field or is_free_text_field
+
+            lang_code = "en-IN" if is_bilingual_field else (session.language or "hi-IN")
             logger.info(
-                "[INWORLD-STT] Active field=%r (is_alphanumeric=%s) -> STT language=%s",
-                active_field, is_alphanumeric_field, lang_code
+                "[INWORLD-STT] Active field=%r (is_alphanumeric=%s, is_free_text=%s) -> STT language=%s",
+                active_field, is_alphanumeric_field, is_free_text_field, lang_code
             )
             
             audio_b64 = base64.b64encode(wav_data).decode('utf-8')
@@ -344,11 +357,13 @@ class InWorldSTTAdapter(ISpeechRecognizer):
             return TranscriptResult(
                 text=clean_text,
                 confidence=stt_confidence,
-                language=session.language,
+                language=lang_code,
                 provider=self.provider_name,
                 duration_seconds=duration_sec,
                 metadata={
                     "model": self._model,
+                    "language": lang_code,
+                    "stt_language": lang_code,
                     "status": "success" if clean_text else "empty",
                     "latency_ms": stt_elapsed_ms,
                     "confidence_available": confidence_available,

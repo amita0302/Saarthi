@@ -202,6 +202,9 @@ async def voice_websocket_endpoint(websocket: WebSocket) -> None:
                 
                 # 🚨 INSTANT USER STT TRANSCRIPT: Send user's transcript immediately before AI processing!
                 if final_text and final_text.strip():
+                    stt_meta_trans = getattr(resp, "navigation_directive", None) or {}
+                    _tx_provider = stt_meta_trans.get("stt_provider", "inworld")
+                    _tx_lang = stt_meta_trans.get("stt_language", "en-IN")
                     tx_reply = WebSocketEnvelope(
                         request_id=end_frame.request_id,
                         session_id=active_session_id,
@@ -209,12 +212,14 @@ async def voice_websocket_endpoint(websocket: WebSocket) -> None:
                         type=ProtocolMessageType.TRANSCRIPT,
                         payload={
                             "text": final_text,
-                            "is_final": True
+                            "is_final": True,
+                            "stt_provider": _tx_provider,
+                            "stt_language": _tx_lang,
                         }
                     )
                     try:
                         outbound_queue.put_nowait(tx_reply)
-                        logger.info(f"[WS-ROUTER] Instant user TRANSCRIPT envelope queued: {final_text!r}")
+                        logger.info(f"[WS-ROUTER] Instant user TRANSCRIPT envelope queued: text={final_text!r} provider={_tx_provider} lang={_tx_lang}")
                     except asyncio.QueueFull:
                         pass
 
@@ -298,14 +303,15 @@ async def voice_websocket_endpoint(websocket: WebSocket) -> None:
                 _recognition_status = _nav.get("recognition_status", "stt_error") if _nav else "stt_error"
                 _transcript = _nav.get("transcript", final_text) if _nav else final_text
                 _stt_provider = _nav.get("stt_provider", "unknown") if _nav else "unknown"
+                _stt_language = _nav.get("stt_language", "unknown") if _nav else "unknown"
                 _stt_confidence = _nav.get("stt_confidence", 0.0) if _nav else 0.0
                 _audio_bytes = _nav.get("audio_bytes_received", turn_audio_bytes) if _nav else turn_audio_bytes
                 _vad_valid = _nav.get("vad_valid", False) if _nav else False
                 _confidence_available = _nav.get("stt_confidence_available", False) if _nav else False
-                logger.info("[DIAG-INVESTIGATION][AI-RESPONSE] request_id=%s session_id=%s transcript_length=%d recognition_status=%s intent=%s action=%s", turn_request_id, active_session_id, len(_transcript or ""), _recognition_status, _intent, _action)
+                logger.info("[DIAG-INVESTIGATION][AI-RESPONSE] request_id=%s session_id=%s transcript_length=%d recognition_status=%s intent=%s action=%s language=%s", turn_request_id, active_session_id, len(_transcript or ""), _recognition_status, _intent, _action, _stt_language)
                 logger.info(
-                    "[WS-ROUTER] AI_RESPONSE payload: target=%s  action=%s  intent=%s  query=%s  fields=%s  active_field=%s  text=%r",
-                    _target, _action, _intent, _query, _fields, _active_field, resp.text[:80] if resp.text else "",
+                    "[WS-ROUTER] AI_RESPONSE payload: target=%s  action=%s  intent=%s  query=%s  fields=%s  active_field=%s  language=%s  text=%r",
+                    _target, _action, _intent, _query, _fields, _active_field, _stt_language, resp.text[:80] if resp.text else "",
                 )
 
                 ai_reply = WebSocketEnvelope(
@@ -324,6 +330,7 @@ async def voice_websocket_endpoint(websocket: WebSocket) -> None:
                         "recognition_status": _recognition_status,
                         "transcript": _transcript,
                         "stt_provider": _stt_provider,
+                        "stt_language": _stt_language,
                         "stt_confidence": _stt_confidence,
                         "stt_confidence_available": _confidence_available,
                         "audio_bytes_received": _audio_bytes,

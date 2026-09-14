@@ -483,6 +483,7 @@ class VoiceGateway:
                 "recognition_status": "low_confidence" if is_low_confidence else "no_speech",
                 "transcript": final_text,
                 "stt_provider": stt_result.provider,
+                "stt_language": getattr(stt_result, "language", None) or (stt_result.metadata or {}).get("language", "unknown"),
                 "stt_confidence": stt_result.confidence,
                 "audio_bytes_received": buffer_size_bytes,
                 "vad_valid": vad_valid,
@@ -530,17 +531,24 @@ class VoiceGateway:
             )
             return empty_response, ""
 
+        stt_lang = getattr(stt_result, "language", None) or (stt_result.metadata or {}).get("language", "unknown")
         merged_user_params = {
             "transport": "voice_websocket",
             "connection_id": session.connection_id,
             "language": session.language,
             "stt_provider": stt_result.provider,
+            "stt_language": stt_lang,
             "confidence": stt_result.confidence,
             "duration_seconds": stt_result.duration_seconds,
             "pujas": session.context_data.get("pujas", []),
         }
         if isinstance(user_parameters, dict):
             merged_user_params.update(user_parameters)
+
+        logger.info(
+            "[BIO-DIAGNOSTIC] field=%r stt_language=%r stt_provider=%r transcript=%r",
+            current_field, stt_lang, stt_result.provider, final_text
+        )
 
         # Create normalized OrchestratorRequest for AIOrchestrator (Module 1)
         interaction_request = OrchestratorRequest(
@@ -569,6 +577,7 @@ class VoiceGateway:
             "recognition_status": recognition_status,
             "transcript": final_text,
             "stt_provider": stt_result.provider,
+            "stt_language": stt_lang,
             "stt_confidence": stt_result.confidence,
             "stt_confidence_available": confidence_available,
             "audio_bytes_received": buffer_size_bytes,
