@@ -299,6 +299,14 @@ function generateUUID(): string {
   });
 }
 
+function getGreetingIntroRatio(text: string): number {
+  const greeting = text.trim();
+  if (!greeting) return 0;
+  const sentenceEnd = greeting.search(/[.!?।]/);
+  const intro = sentenceEnd >= 0 ? greeting.slice(0, sentenceEnd + 1) : greeting;
+  return Math.min(1, intro.length / greeting.length);
+}
+
 export function useSaarthiVoice() {
   const { state, setDialogueText, setSaarthiState, forceMinimize, announceMessage, setNeedsRepeat } = useSaarthi();
   
@@ -309,11 +317,22 @@ export function useSaarthiVoice() {
   const [isConnected, setIsConnected] = useState(false);
   const [isSessionReady, setIsSessionReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isTtsPlaying, setIsTtsPlaying] = useState(false);
+  const [ttsPlaybackId, setTtsPlaybackId] = useState(0);
+  const [isGreetingTtsSpeaking, setIsGreetingTtsSpeaking] = useState(false);
 
   // Push-to-talk state removed for revert
 
 
   const isVoiceEnabledRef = useRef<boolean>(true);
+  const isTtsPlayingRef = useRef(false);
+  const greetingPlaybackRef = useRef({
+    active: false,
+    introRatio: 0,
+    startedAt: null as number | null,
+    cueScheduled: false,
+    cueSource: null as AudioBufferSourceNode | null,
+  });
   const wsRef = useRef<WebSocket | null>(null);
   const isRateLimitedRef = useRef<boolean>(false);
   const hasAnnouncedRateLimitRef = useRef<boolean>(false);
@@ -339,6 +358,82 @@ export function useSaarthiVoice() {
   const connectionTimeoutRef = useRef<any>(null);
   const reconnectAttemptsRef = useRef(0);
   const MAX_RECONNECT_ATTEMPTS = 10;
+
+  const stopGreetingTtsVisual = useCallback(() => {
+    const greetingPlayback = greetingPlaybackRef.current;
+    greetingPlayback.active = false;
+    if (greetingPlayback.cueSource) {
+      try {
+        greetingPlayback.cueSource.stop();
+      } catch (_) {}
+    }
+    greetingPlayback.cueSource = null;
+    setIsGreetingTtsSpeaking(false);
+  }, []);
+
+  const beginGreetingTtsVisual = useCallback((text: string) => {
+    stopGreetingTtsVisual();
+    greetingPlaybackRef.current = {
+      active: true,
+      introRatio: getGreetingIntroRatio(text),
+      startedAt: null,
+      cueScheduled: false,
+      cueSource: null,
+    };
+  }, [stopGreetingTtsVisual]);
+
+  const scheduleGreetingTalkingVideo = useCallback((audioContext: AudioContext) => {
+    const greetingPlayback = greetingPlaybackRef.current;
+    if (!greetingPlayback.active || greetingPlayback.cueScheduled || greetingPlayback.startedAt === null || !isFinalChunkReceived.current) {
+      return;
+    }
+
+    const totalDuration = nextStartTimeRef.current - greetingPlayback.startedAt;
+    if (totalDuration <= 0) return;
+
+    greetingPlayback.cueScheduled = true;
+    const transitionToTalking = () => {
+      if (greetingPlaybackRef.current.active) {
+        setIsGreetingTtsSpeaking(true);
+      }
+    };
+    const transitionAt = greetingPlayback.startedAt + totalDuration * greetingPlayback.introRatio;
+
+    if (transitionAt <= audioContext.currentTime) {
+      transitionToTalking();
+      return;
+    }
+
+    const cueSource = audioContext.createBufferSource();
+    const cueGain = audioContext.createGain();
+    cueGain.gain.value = 0;
+    cueSource.buffer = audioContext.createBuffer(1, 1, audioContext.sampleRate);
+    cueSource.connect(cueGain);
+    cueGain.connect(audioContext.destination);
+    cueSource.onended = () => {
+      try {
+        cueSource.disconnect();
+        cueGain.disconnect();
+      } catch (_) {}
+      transitionToTalking();
+    };
+    greetingPlayback.cueSource = cueSource;
+    cueSource.start(transitionAt);
+  }, []);
+
+  const markTtsPlaybackStarted = useCallback(() => {
+    if (isTtsPlayingRef.current) return;
+    isTtsPlayingRef.current = true;
+    setIsTtsPlaying(true);
+    setTtsPlaybackId((playbackId) => playbackId + 1);
+  }, []);
+
+  const markTtsPlaybackStopped = useCallback(() => {
+    stopGreetingTtsVisual();
+    if (!isTtsPlayingRef.current) return;
+    isTtsPlayingRef.current = false;
+    setIsTtsPlaying(false);
+  }, [stopGreetingTtsVisual]);
 
   const updateSessionReady = useCallback((ready: boolean) => {
     console.log(`[Voice] Session ready state updated: ${ready}`);
@@ -382,6 +477,7 @@ export function useSaarthiVoice() {
     pcmByteLeftoverRef.current = null;
     nextStartTimeRef.current = 0;
     isPlayingRef.current = false;
+    markTtsPlaybackStopped();
     isFinalChunkReceived.current = false;
     if (currentAudioSourceRef.current) {
       try {
@@ -435,7 +531,7 @@ export function useSaarthiVoice() {
     // 6. Force state to idle
     stateRef.current = 'idle';
     setSaarthiState('idle');
-  }, [setSaarthiState, updateSessionReady]);
+  }, [markTtsPlaybackStopped, setSaarthiState, updateSessionReady]);
 
   const enableVoice = useCallback(() => {
     console.log('[Voice] Enabling voice subsystem');
@@ -608,6 +704,7 @@ export function useSaarthiVoice() {
     audioBytesAccumulatorRef.current = [];
     nextStartTimeRef.current = 0;
     isPlayingRef.current = false;
+    markTtsPlaybackStopped();
     isFinalChunkReceived.current = false;
 
     if (fallbackTimeoutRef.current) {
@@ -621,7 +718,7 @@ export function useSaarthiVoice() {
       isExecutingSequenceRef.current = false;
       isSaarthiTypingRef.current = false;
     }
-  }, []);
+  }, [markTtsPlaybackStopped]);
 
   // Tier 2: Track manual user interactions (typing/clicking) on form fields and advance voice flow on completion
   useEffect(() => {
@@ -1668,14 +1765,14 @@ export function useSaarthiVoice() {
             }
 
             // ── GREETING & CEREMONIAL VISUAL MOMENT: Trigger 'greeting' avatar animation ──
-            if (intent === 'GREETING' || msg.payload.intent === 'GREETING' || contentStr.toLowerCase().includes('namaste') || contentStr.toLowerCase().includes('om namah shivaya')) {
+            const isGreetingResponse = intent === 'GREETING' || msg.payload.intent === 'GREETING' || contentStr.toLowerCase().includes('namaste') || contentStr.toLowerCase().includes('om namah shivaya');
+            if (isGreetingResponse) {
               console.log('[Voice] [CONNECT-DIAGNOSTIC] Initial Greeting response received. Triggering greeting avatar animation.');
               action = null;
               target = null;
-              setSaarthiState('greeting' as any);
-              setTimeout(() => {
-                setSaarthiState('speaking');
-              }, 1200);
+              beginGreetingTtsVisual(contentStr);
+              stateRef.current = 'greeting';
+              setSaarthiState('greeting');
             }
 
             // ── COMPLETION VISUAL MOMENT: Trigger 'namaste' avatar bow on onboarding handoff / summary ──
@@ -2339,8 +2436,11 @@ export function useSaarthiVoice() {
                setDialogueText(fullText);
             }
 
-            console.log('[STATE]', 'idle -> speaking');
-            setSaarthiState('speaking');
+            if (!isGreetingResponse) {
+              console.log('[STATE]', 'idle -> speaking');
+              stateRef.current = 'speaking';
+              setSaarthiState('speaking');
+            }
             isFinalChunkReceived.current = false;
             
             // Fallback: if no audio arrives or queue gets stuck, go back to listening after 20 seconds
@@ -2784,9 +2884,9 @@ export function useSaarthiVoice() {
 
     try {
       isPlayingRef.current = true;
-      if (stateRef.current !== 'speaking') {
-        stateRef.current = 'speaking';
-        setSaarthiState('speaking');
+        if (stateRef.current !== 'speaking' && stateRef.current !== 'greeting') {
+          stateRef.current = 'speaking';
+          setSaarthiState('speaking');
       }
 
       // 1. GAPLESS SCHEDULING: Drain all ready buffers from audioQueueRef and schedule sequentially
@@ -2804,6 +2904,9 @@ export function useSaarthiVoice() {
         const startTime = isFirstOrUnderrun ? now + 0.025 : Math.max(now, nextStartTimeRef.current);
         const duration = buffer.duration;
         nextStartTimeRef.current = startTime + duration;
+        if (greetingPlaybackRef.current.active && greetingPlaybackRef.current.startedAt === null) {
+          greetingPlaybackRef.current.startedAt = startTime;
+        }
 
         console.log(
           `[Voice-PCM] Scheduled buffer: start=${startTime.toFixed(4)}s, dur=${duration.toFixed(4)}s, ctxTime=${now.toFixed(4)}s, leadTime=${(startTime - now).toFixed(4)}s, activeSources=${activeSourcesRef.current.size + 1}`
@@ -2823,6 +2926,7 @@ export function useSaarthiVoice() {
             if (isFinalChunkReceived.current) {
               console.log('[Voice-PCM] All scheduled buffers ended. Stream complete.');
               isPlayingRef.current = false;
+              markTtsPlaybackStopped();
 
               // Immediate buffer purge: drop any speaker audio captured by the microphone during playback
               preRollFramesRef.current = [];
@@ -2874,6 +2978,7 @@ export function useSaarthiVoice() {
 
         try {
           source.start(startTime);
+          markTtsPlaybackStarted();
         } catch (err: any) {
           console.error('[Voice-PCM] source.start threw error:', err);
           activeSourcesRef.current.delete(source);
@@ -2882,10 +2987,11 @@ export function useSaarthiVoice() {
           } catch (_) {}
         }
       }
+      scheduleGreetingTalkingVideo(audioCtx);
     } finally {
       isSchedulingRef.current = false;
     }
-  }, [setSaarthiState]);
+  }, [markTtsPlaybackStarted, markTtsPlaybackStopped, scheduleGreetingTalkingVideo, setSaarthiState]);
 
   useEffect(() => {
     playNextAudioRef.current = playNextAudio;
@@ -3366,6 +3472,7 @@ export function useSaarthiVoice() {
     pcmByteLeftoverRef.current = null;
     nextStartTimeRef.current = 0;
     isPlayingRef.current = false;
+    markTtsPlaybackStopped();
     isFinalChunkReceived.current = false;
     preRollFramesRef.current = [];
     if (ttsCooldownTimerRef.current) {
@@ -3384,7 +3491,7 @@ export function useSaarthiVoice() {
     if (resetVadStateRef.current) resetVadStateRef.current();
     stateRef.current = 'listening';
     setSaarthiState('listening');
-  }, [setSaarthiState]);
+  }, [markTtsPlaybackStopped, setSaarthiState]);
 
-  return { isConnected, isSessionReady, error, stopSpeaking, disableVoice, enableVoice };
+  return { isConnected, isSessionReady, error, isTtsPlaying, ttsPlaybackId, isGreetingTtsSpeaking, stopSpeaking, disableVoice, enableVoice };
 }

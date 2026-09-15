@@ -9,7 +9,7 @@ import { ChoicePopup } from './ChoicePopup';
 import { useSaarthiVoice } from '../../hooks/useSaarthiVoice';
 
 export const SaarthiController: React.FC = () => {
-  const { } = useSaarthiVoice();
+  const { isTtsPlaying, ttsPlaybackId, isGreetingTtsSpeaking } = useSaarthiVoice();
   const location = useLocation();
 
   useEffect(() => {
@@ -58,6 +58,9 @@ export const SaarthiController: React.FC = () => {
                       : state
                     }
                     minimized={false}
+                    isTtsPlaying={isTtsPlaying}
+                    ttsPlaybackId={ttsPlaybackId}
+                    isGreetingTtsSpeaking={isGreetingTtsSpeaking}
                   />
 
                   {/* 32px Circular Glass Minimize (X) Button Attached to Avatar */}
@@ -112,6 +115,9 @@ export const SaarthiController: React.FC = () => {
             state={state}
             minimized={true}
             onClick={toggleMinimized}
+            isTtsPlaying={isTtsPlaying}
+            ttsPlaybackId={ttsPlaybackId}
+            isGreetingTtsSpeaking={isGreetingTtsSpeaking}
           />
 
         </motion.div>
