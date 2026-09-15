@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -165,11 +165,20 @@ export default function SignUp() {
   const [panditCodeOfConduct, setPanditCodeOfConduct] = useState(false);
 
   useEffect(() => {
+    (window as any)._panditAadhaarFile = aadhaarFile;
+  }, [aadhaarFile]);
+
+  useEffect(() => {
+    (window as any)._panditCertFile = certFile;
+  }, [certFile]);
+
+  useEffect(() => {
     (window as any)._panditGalleryFiles = galleryFiles;
   }, [galleryFiles]);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
   const [formSent, setFormSent] = useState(false);
   const [draftLink, setDraftLink] = useState<string | null>(null);
 
@@ -737,6 +746,11 @@ export default function SignUp() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
+    if (isSubmittingRef.current) {
+      console.warn('[SIGNUP-SUBMIT] Duplicate submit blocked by synchronous isSubmittingRef guard.');
+      return;
+    }
+
     if (userType === 'pandit') {
       const step1Valid = validatePanditStep1();
       const step2Valid = validatePanditStep2();
@@ -751,12 +765,24 @@ export default function SignUp() {
       }
       if (!step3Valid) {
         setPanditStep(3);
+        if (!aadhaarFile) {
+          announceMessage('Kripya apna Aadhaar card ya ID proof upload kijiye.', false);
+        } else if (!panditPassword || panditPassword.length < 8) {
+          announceMessage('Kripya kam se kam 8 characters ka password set kijiye.', false);
+        } else if (panditPassword !== panditConfirmPassword) {
+          announceMessage('Aapka password aur confirm password match nahi ho rahe, kripya check karein.', false);
+        } else if (!panditCodeOfConduct) {
+          announceMessage('Kripya Code of Conduct aur Terms ka checkbox accept karein.', false);
+        } else {
+          announceMessage('Kripya highlighted fields check karke form poora karein.', false);
+        }
         return;
       }
     } else {
       if (!validateDevotee()) return;
     }
 
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
     setErrors({});
 
@@ -849,15 +875,40 @@ export default function SignUp() {
         }
       }
     } catch (err: unknown) {
-      const errorMessage =
-        err instanceof Error ? err.message : 'Registration failed. Please try again.';
-      setErrors({ api: errorMessage });
+      const status = (err as any)?.status || (err as any)?.statusCode || (err as any)?.response?.status;
+      const rawMessage = err instanceof Error ? err.message : 'Registration failed. Please try again.';
+      
+      let displayError = rawMessage;
+      let speechMessage = '';
+
+      if (status === 409) {
+        displayError = rawMessage || 'Is email address ya mobile number se pehle se ek application maujood hai.';
+        speechMessage = `Panditji, ${displayError} Kripya doosri email id ya phone number use karein.`;
+      } else if (status === 400 || status === 422) {
+        displayError = rawMessage || 'Kuch jaankari sahi nahi hai. Kripya form check kariye.';
+        speechMessage = rawMessage.toLowerCase().includes('password')
+          ? rawMessage
+          : 'Lagta hai form mein kuch jaankari adhoori ya galat hai, kripya check karke dobara submit karein.';
+      } else if (status && status >= 500) {
+        displayError = 'Server par takneeki samasya aayi hai. Kripya kuch samay baad dobara koshish karein.';
+        speechMessage = 'Server par samasya aa gayi hai. Kripya kuch samay baad dobara koshish karein.';
+      } else {
+        speechMessage = rawMessage;
+      }
+
+      setErrors({ api: displayError });
+
+      // Auto-scroll so user clearly sees the error banner
+      const formEl = document.getElementById('pandit-onboarding-form') || document.getElementById('signup-form');
+      if (formEl) {
+        formEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
 
       if (userType === 'pandit') {
-        const errorMsg = 'Lagta hai kuch jaankari mein dikkat hai, kripya form check kariye.';
-        announceMessage(errorMsg, false);
+        announceMessage(speechMessage, false);
       }
     } finally {
+      isSubmittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -1704,9 +1755,17 @@ export default function SignUp() {
                                 type="file"
                                 accept=".pdf,image/*"
                                 style={{ display: 'none' }}
-                                onChange={(e) => setAadhaarFile(e.target.files?.[0] || null)}
+                                onChange={(e) => {
+                                  setAadhaarFile(e.target.files?.[0] || null);
+                                  if (errors.aadhaarFile) clearError('aadhaarFile');
+                                }}
                               />
                             </label>
+                            {errors.aadhaarFile && (
+                              <span id="pandit-aadhaar-error" className="field-error" role="alert">
+                                <ShieldAlert size={14} /> {errors.aadhaarFile}
+                              </span>
+                            )}
                           </div>
                         </div>
 
@@ -1900,6 +1959,8 @@ export default function SignUp() {
                         <div className="field">
                           <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.78rem', color: '#68645f', cursor: 'pointer', lineHeight: 1.5 }}>
                             <input
+                              id="pandit-code-of-conduct"
+                              name="codeOfConduct"
                               type="checkbox"
                               required
                               checked={panditCodeOfConduct}

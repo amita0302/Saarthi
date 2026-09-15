@@ -174,7 +174,7 @@ export function getFormStateData(): Record<string, string> {
     const aadhaarInput = document.querySelector<HTMLInputElement>('#pandit-aadhaarFile, #pandit-aadhaar-input, [data-testid="input-pandit-aadhaarFile"], [data-testid="input-aadhaar-file"]');
     const certInput = document.querySelector<HTMLInputElement>('#pandit-certFile, #pandit-cert-input, [data-testid="input-pandit-certFile"], [data-testid="input-cert-file"]');
     const galleryInput = document.querySelector<HTMLInputElement>('#pandit-galleryFiles, [data-testid="input-pandit-galleryFiles"]');
-    const termsEl = document.querySelector<HTMLInputElement>('#pandit-terms-accepted, [data-testid="checkbox-pandit-terms"]');
+    const termsEl = document.querySelector<HTMLInputElement>('#pandit-code-of-conduct, [data-testid="checkbox-pandit-conduct"], #pandit-terms-accepted, [data-testid="checkbox-pandit-terms"]');
 
     const stepEl = document.querySelector('[data-testid="pandit-wizard-step"]');
     if (stepEl) {
@@ -235,18 +235,20 @@ export function getFormStateData(): Record<string, string> {
                           (avatarPreviewImg && avatarPreviewImg.getAttribute('src')?.startsWith('data:image'));
     data['avatar_attached'] = hasAvatarFile ? 'true' : 'false';
 
-    const hasAadhaar = Boolean(aadhaarInput && aadhaarInput.files && aadhaarInput.files.length > 0);
+    const windowAadhaar = (window as any)._panditAadhaarFile;
+    const hasAadhaar = Boolean((aadhaarInput && aadhaarInput.files && aadhaarInput.files.length > 0) || windowAadhaar);
     data['aadhaar_attached'] = hasAadhaar ? 'true' : 'false';
     data['aadhaarFile_attached'] = hasAadhaar ? 'true' : 'false';
     if (hasAadhaar) {
-      data['pandit-aadhaarFile'] = aadhaarInput?.files?.[0]?.name || 'attached';
+      data['pandit-aadhaarFile'] = aadhaarInput?.files?.[0]?.name || windowAadhaar?.name || 'attached';
     }
 
-    const hasCert = Boolean(certInput && certInput.files && certInput.files.length > 0);
+    const windowCert = (window as any)._panditCertFile;
+    const hasCert = Boolean((certInput && certInput.files && certInput.files.length > 0) || windowCert);
     data['cert_attached'] = hasCert ? 'true' : 'false';
     data['certFile_attached'] = hasCert ? 'true' : 'false';
     if (hasCert) {
-      data['pandit-certFile'] = certInput?.files?.[0]?.name || 'attached';
+      data['pandit-certFile'] = certInput?.files?.[0]?.name || windowCert?.name || 'attached';
     }
 
     const windowGalleryFiles: File[] = Array.isArray((window as any)._panditGalleryFiles) ? (window as any)._panditGalleryFiles : [];
@@ -268,7 +270,9 @@ export function getFormStateData(): Record<string, string> {
       data['pandit-galleryFiles'] = galleryFilesList.map((f) => f.name).join(', ');
     }
 
-    data['terms_accepted'] = (termsEl && termsEl.checked) ? 'true' : 'false';
+    const isTermsChecked = Boolean(termsEl && termsEl.checked);
+    data['terms_accepted'] = isTermsChecked ? 'true' : 'false';
+    data['pandit-code-of-conduct'] = isTermsChecked ? 'true' : 'false';
 
     if ((window as any)._lastSubmissionError) {
       data['submission_error'] = (window as any)._lastSubmissionError;
@@ -962,16 +966,6 @@ export function useSaarthiVoice() {
         cursor.style.backgroundColor = 'rgba(238, 124, 43, 0.9)';
         
         targetEl.click();
-        const formEl = targetEl.closest('form');
-        if (formEl && (targetEl.getAttribute('type') === 'submit' || step.target.includes('submit'))) {
-          console.log('[FORM-SUBMIT] Triggering form.requestSubmit() explicitly');
-          if (typeof formEl.requestSubmit === 'function') {
-            formEl.requestSubmit();
-          } else {
-            formEl.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-          }
-        }
-
         console.log(`[FORM-FILL-PROOF] Click executed on: "${step.target}". Text: "${targetEl.textContent?.trim()}". ActiveAfter: "${targetEl.getAttribute('aria-pressed') || targetEl.className || 'clicked'}"`);
         
         setTimeout(() => {
@@ -1937,7 +1931,12 @@ export function useSaarthiVoice() {
                 else if (fTarget.includes('bio')) selector = '#pandit-bio, [data-testid="textarea-pandit-bio"]';
                 else if (fTarget.includes('achieve')) selector = '#pandit-achievements, [data-testid^="input-pandit-achievements-"]';
                 else if (fTarget.includes('date')) selector = 'input[name="date"], input[type="date"], [data-testid="input-date"], #booking-date';
-                else if (fTarget.includes('time')) selector = 'input[name="time"], input[type="time"], [data-testid="input-time"], select#booking-time, #booking-time';
+                else if (fTarget === 'pandit-password' || fTarget.includes('password')) selector = '#pandit-password, [data-testid="input-pandit-password"]';
+                else if (fTarget === 'pandit-confirm' || fTarget.includes('confirm')) selector = '#pandit-confirm, [data-testid="input-pandit-confirm"]';
+                else if (fTarget.includes('aadhaar')) selector = '#pandit-aadhaarFile, [data-testid="input-pandit-aadhaarFile"], [data-testid="upload-pandit-aadhaarFile"]';
+                else if (fTarget.includes('cert')) selector = '#pandit-certFile, [data-testid="input-pandit-certFile"], [data-testid="upload-pandit-certFile"]';
+                else if (fTarget.includes('gallery')) selector = '#pandit-galleryFiles, [data-testid="input-pandit-galleryFiles"], [data-testid="upload-pandit-galleryFiles"]';
+                else if (fTarget.includes('conduct') || fTarget.includes('terms')) selector = '#pandit-code-of-conduct, [data-testid="checkbox-pandit-conduct"], #pandit-terms-accepted, [data-testid="checkbox-pandit-terms"]';
                 else selector = `input[name="${fTarget}"], #${fTarget}`;
                 
                 console.log(`[FORM-FILL] Processing field ${fTarget} -> selector: ${selector}`);
@@ -2160,6 +2159,9 @@ export function useSaarthiVoice() {
                       seq.push({ action: 'move', target: achSelector, delay: 450 });
                       seq.push({ action: 'type', target: achSelector, text: part, delay: 350 });
                     });
+                  } else if (fTarget.includes('conduct') || fTarget.includes('terms')) {
+                    seq.push({ action: 'move', target: selector, delay: 450 });
+                    seq.push({ action: 'click', target: selector, delay: 250 });
                   } else {
                     seq.push({ action: 'move', target: selector, delay: 450 });
                     seq.push({ action: 'type', target: selector, text: fQuery, delay: 350 });
@@ -2168,8 +2170,13 @@ export function useSaarthiVoice() {
                   const element = document.querySelector(selector);
                   console.log(`[FORM-FILL] Attempting to queue fill: field="${fTarget}", value="${fQuery}", selector="${selector}", foundElement=${!!element}`);
                   if (element || hasNavigatedToPandit) {
-                    seq.push({ action: 'move', target: selector, delay: 800 });
-                    seq.push({ action: 'type', target: selector, text: fQuery, delay: 800 });
+                    if (fTarget.includes('conduct') || fTarget.includes('terms')) {
+                      seq.push({ action: 'move', target: selector, delay: 600 });
+                      seq.push({ action: 'click', target: selector, delay: 300 });
+                    } else {
+                      seq.push({ action: 'move', target: selector, delay: 800 });
+                      seq.push({ action: 'type', target: selector, text: fQuery, delay: 800 });
+                    }
                   } else {
                     console.warn(`[FORM-FILL] Could not find element for target: ${fTarget}`);
                   }
@@ -2179,7 +2186,7 @@ export function useSaarthiVoice() {
               const isPanditActive = activeField?.startsWith('pandit-') || window.location.pathname.includes('signup');
               if (activeField && isPanditActive) {
                 const step2Fields = ['exp', 'gurukul', 'education', 'spec', 'lang', 'achievements', 'bio'];
-                const step3Fields = ['certfile', 'aadhaarfile', 'galleryfiles', 'password', 'confirm', 'codeofconduct'];
+                const step3Fields = ['certfile', 'aadhaarfile', 'galleryfiles', 'password', 'confirm', 'codeofconduct', 'conduct', 'terms'];
                 let targetStep: 1 | 2 | 3 = 1;
                 const fLower = activeField.toLowerCase();
                 if (step2Fields.some(f => fLower.includes(f))) targetStep = 2;
@@ -2238,17 +2245,21 @@ export function useSaarthiVoice() {
                   }
                   return;
                 } else if (currentStep === '3') {
-                  // Perform 5 Step 3 Checks
+                  // Perform Step 3 Checks
                   const pwdEl = document.querySelector<HTMLInputElement>('#pandit-password, [data-testid="input-pandit-password"]');
                   const cpwdEl = document.querySelector<HTMLInputElement>('#pandit-confirm, [data-testid="input-pandit-confirm"]');
-                  const termsEl = document.querySelector<HTMLInputElement>('#pandit-terms-accepted, [data-testid="checkbox-pandit-terms"], [data-testid="checkbox-terms"], input[type="checkbox"]');
+                  const termsEl = document.querySelector<HTMLInputElement>('#pandit-code-of-conduct, [data-testid="checkbox-pandit-conduct"], #pandit-terms-accepted, [data-testid="checkbox-pandit-terms"], input[type="checkbox"]');
+                  const aadhaarInput = document.querySelector<HTMLInputElement>('#pandit-aadhaarFile, [data-testid="input-pandit-aadhaarFile"]');
+                  const windowAadhaar = (window as any)._panditAadhaarFile;
+                  const hasAadhaar = Boolean((aadhaarInput?.files && aadhaarInput.files.length > 0) || windowAadhaar);
 
                   const pwdVal = pwdEl?.value?.trim() || '';
                   const cpwdVal = cpwdEl?.value?.trim() || '';
                   const hasPwd = pwdVal.length >= 8;
                   const pwdMatches = pwdVal === cpwdVal;
-                  if (termsEl && !termsEl.checked) {
-                    announceMessage("Kripya checkbox par click karke terms accept karein.", false);
+
+                  if (!hasAadhaar) {
+                    announceMessage("Panditji, kripya pehle apna Aadhaar card ya ID proof upload kijiye.", false);
                     return;
                   }
 
@@ -2261,6 +2272,11 @@ export function useSaarthiVoice() {
                       cpwdEl.dispatchEvent(new Event('input', { bubbles: true }));
                     }
                     announceMessage("Panditji, aapne password galat daala hai, dono password match nahi ho rahe. Kripya dobara try karein.", false);
+                    return;
+                  }
+
+                  if (termsEl && !termsEl.checked) {
+                    announceMessage("Kripya checkbox par click karke terms accept karein.", false);
                     return;
                   }
 

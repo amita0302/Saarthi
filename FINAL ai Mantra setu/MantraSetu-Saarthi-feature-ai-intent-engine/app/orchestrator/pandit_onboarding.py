@@ -179,12 +179,10 @@ def get_contextual_reaction(current_field: str, val: str, address_info: dict) ->
         return f"Dhanyawad {sn_ji}! {val} se jude Panditji humare prant ki shaan hain."
 
     if current_field == "pandit-phone":
-        formatted_phone = format_phone_for_speech(val)
-        return f"Shukriya {sn_ji}! Maine aapka mobile number {formatted_phone} record kar liya hai."
+        return f"Shukriya {sn_ji}! Maine aapka mobile number {val} record kar liya hai."
 
     if current_field == "pandit-email":
-        email_speech = format_email_for_speech(val)
-        return f"Bahut badhiya {pji}! Maine aapka email address {email_speech} record kar liya hai."
+        return f"Bahut badhiya {pji}! Maine aapka email address {val} record kar liya hai."
 
     return f"Bahut sundar {fn_ji}!"
 
@@ -199,9 +197,9 @@ def format_phone_for_speech(phone: str) -> str:
 
 
 def build_phone_confirmation_prompt(phone: str) -> str:
-    """Build confirmation question for phone number: 'Maine suna — [formatted_phone]. Kya ye sahi hai?'"""
-    formatted = format_phone_for_speech(phone)
-    return f"Maine suna — {formatted}. Kya ye sahi hai?"
+    """Build confirmation question for phone number: 'Maine suna — [phone]. Kya ye sahi hai?'"""
+    phone_clean = str(phone).strip()
+    return f"Maine suna — {phone_clean}. Kya ye sahi hai?"
 
 
 def format_email_for_speech(email: str) -> str:
@@ -378,8 +376,6 @@ def format_value_for_display(val: Any) -> str:
             return f"{', '.join(items[:-1])} aur {items[-1]}"
     elif isinstance(val, str):
         val_str = val.strip()
-        if re.match(r'^[6789]\d{9}$', val_str):
-            return format_phone_for_speech(val_str)
         if val_str.startswith("[") and val_str.endswith("]"):
             try:
                 import ast
@@ -410,9 +406,9 @@ def generate_summary_text(first_name: str, collected_data: dict, address_info: d
     full_name = f"{first_name_val} {last_name_val}".strip()
     
     phone_raw = collected_data.get("pandit-phone", "Not provided")
-    phone_val = format_phone_for_speech(phone_raw)
+    phone_val = phone_raw
     email_raw = collected_data.get("pandit-email", "Not provided")
-    email_val = format_email_for_speech(email_raw)
+    email_val = email_raw
     gender_val = collected_data.get("pandit-gender", "Not provided")
     avail_val = collected_data.get("pandit-availability", "Not provided")
     city_val = collected_data.get("pandit-city", "Not provided")
@@ -1269,7 +1265,7 @@ def register_field_validator(field_name: str, validator_fn: Callable[[str, dict]
 def _validate_phone(val: str, params: dict) -> FieldValidationResult:
     if is_fragmented_digit_transcript(val):
         digits = re.sub(r'\D', '', val)
-        formatted = format_phone_for_speech(digits) if digits else ""
+        formatted = digits if digits else ""
         err = f"Maine suna: '{formatted}', lekin phone number ke beech mein shor tha. Kripya bina rukavat 10-digit mobile number dobara boliye."
         logger.warning("[TELEMETRY-ONBOARDING] FIELD_REJECTED: field=pandit-phone | reason=fragmented | val=%s", val)
         return FieldValidationResult(False, error_message=err)
@@ -1285,7 +1281,7 @@ def _validate_phone(val: str, params: dict) -> FieldValidationResult:
     if len(digits) == 10 and re.match(r'^[6789]', digits):
         logger.info("[TELEMETRY-ONBOARDING] FIELD_ACCEPTED: field=pandit-phone | val=%s", digits)
         return FieldValidationResult(True, cleaned_value=digits)
-    formatted = format_phone_for_speech(digits) if digits else ""
+    formatted = digits if digits else ""
     if digits:
         logger.warning("[TELEMETRY-ONBOARDING] FIELD_REJECTED: field=pandit-phone | reason=invalid_format_digits | val=%s", digits)
         if len(digits) == 10 and not re.match(r'^[6789]', digits):
@@ -1508,10 +1504,19 @@ register_field_validator("pandit-galleryFiles", _make_confirmation_validator("ga
 register_field_validator("pandit-password", _make_confirmation_validator("password set"))
 
 def _validate_confirm_password(val: str, params: dict) -> FieldValidationResult:
-    if not val or val == "INVALID" or not is_upload_confirmed(val):
+    is_manual = isinstance(params, dict) and (params.get("source") == "manual_input" or params.get("is_manual") is True)
+    dom_data = params.get("dom_form_data", {}) if isinstance(params, dict) else {}
+    confirm_filled = (
+        params.get("confirm_filled") == "true" or params.get("pandit-confirm_filled") == "true"
+        or dom_data.get("confirm_filled") == "true" or dom_data.get("pandit-confirm_filled") == "true"
+    )
+    is_confirmed = is_upload_confirmed(str(val or "")) or is_manual or confirm_filled or (val and val != "INVALID" and len(str(val).strip()) >= 4)
+
+    if not is_confirmed:
         return FieldValidationResult(False, error_message="Kripya confirm password enter karke mujhe 'ho gaya' ya 'submit kar do' boliye.")
+
     pwd = params.get("pandit-password") or params.get("password")
-    cpwd = params.get("pandit-confirm") or params.get("confirm_password") or params.get("confirm")
+    cpwd = params.get("pandit-confirm") or params.get("confirm_password") or params.get("confirm") or (val if val != "Confirmed" else None)
     if pwd and len(pwd) < 8:
         return FieldValidationResult(False, error_message="Password kam se kam 8 characters ka hona chahiye. Kripya naya password set karein.")
     if pwd and cpwd and pwd != cpwd:
@@ -1527,7 +1532,26 @@ def _validate_pandit_avatar(val: str, params: dict) -> FieldValidationResult:
     return FieldValidationResult(True, cleaned_value="Skipped")
 
 register_field_validator("pandit-avatar", _validate_pandit_avatar)
+
+def _validate_code_of_conduct(val: str, params: dict) -> FieldValidationResult:
+    dom_data = params.get("dom_form_data", {}) if isinstance(params, dict) else {}
+    terms_dom = (
+        params.get("terms_accepted") == "true" or dom_data.get("terms_accepted") == "true"
+        or params.get("pandit-code-of-conduct") in ("true", "1", True, "confirmed")
+        or dom_data.get("pandit-code-of-conduct") in ("true", "1", True, "confirmed")
+    )
+    is_manual = isinstance(params, dict) and (params.get("source") == "manual_input" or params.get("is_manual") is True)
+    input_lower = str(val or "").lower().strip()
+    agree_keywords = [
+        "haan", "yes", "sweekar", "manzoor", "accept", "accepted", "agree", "agreed",
+        "tick", "ho gaya", "kar diya", "done", "ok", "theek", "submit", "sabmit"
+    ]
+    if terms_dom or is_manual or any(k in input_lower for k in agree_keywords):
+        return FieldValidationResult(True, cleaned_value="Accepted")
+    return FieldValidationResult(False, error_message="Kripya Code of Conduct aur Terms accept karne ke liye checkbox par tick kijiye ya 'haan sweekar hai' boliye.")
+
 register_field_validator("pandit-confirm", _validate_confirm_password)
+register_field_validator("pandit-code-of-conduct", _validate_code_of_conduct)
 
 # 6. Standard Non-Empty Validators
 def _make_non_empty_validator(hinglish_label: str) -> Callable[[str, dict], FieldValidationResult]:
@@ -1701,18 +1725,27 @@ async def process_onboarding_step(
                 dom_value = dom_snapshot.get(field) or dom_snapshot.get(field.replace("pandit-", ""))
                 if dom_value and str(dom_value).strip() and not str(dom_value).lower().endswith("_filled"):
                     state.setdefault("collected_data", {})[field] = str(dom_value).strip()
-        if "pandit-code-of-conduct" in user_edited_fields or client_active_field in ("pandit-code-of-conduct", "code-of-conduct"):
-            if dom_snapshot.get("terms_accepted") == "true":
-                state.setdefault("collected_data", {})["pandit-code-of-conduct"] = "confirmed"
+        if dom_snapshot.get("terms_accepted") == "true" or dom_snapshot.get("pandit-code-of-conduct") in ("true", "1", "confirmed"):
+            state.setdefault("collected_data", {})["pandit-code-of-conduct"] = "confirmed"
         for password_field in ("pandit-password", "pandit-confirm"):
-            if password_field in user_edited_fields or client_active_field in (password_field, password_field.replace("pandit-", "")):
+            if (
+                password_field in user_edited_fields
+                or client_active_field in (password_field, password_field.replace("pandit-", ""))
+                or dom_snapshot.get(f"{password_field}_filled") == "true"
+            ):
                 if dom_snapshot.get(f"{password_field}_filled") == "true":
                     state.setdefault("collected_data", {})[password_field] = "confirmed"
         for field, snapshot_key in (("pandit-certFile", "cert_attached"), ("pandit-aadhaarFile", "aadhaar_attached")):
             base_prefix = snapshot_key.split('_')[0]
             alt_key = f"{base_prefix}File_attached"
             alias_fields = (field, field.replace("pandit-", ""), f"pandit-{base_prefix}-input", f"{base_prefix}-input")
-            if field in user_edited_fields or any(af in user_edited_fields for af in alias_fields) or client_active_field in alias_fields:
+            if (
+                field in user_edited_fields
+                or any(af in user_edited_fields for af in alias_fields)
+                or client_active_field in alias_fields
+                or dom_snapshot.get(snapshot_key) == "true"
+                or dom_snapshot.get(alt_key) == "true"
+            ):
                 if dom_snapshot.get(snapshot_key) == "true" or dom_snapshot.get(alt_key) == "true" or dom_snapshot.get(field):
                     state.setdefault("collected_data", {})[field] = "confirmed"
 

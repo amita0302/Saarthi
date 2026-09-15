@@ -20,32 +20,32 @@ class TestPhoneReadbackConfirmation(unittest.TestCase):
             {
                 "phone": "6123456789",
                 "expected_formatted": "six, one, two, three, four, five, six, seven, eight, nine",
-                "expected_prompt": "Maine suna — six, one, two, three, four, five, six, seven, eight, nine. Kya ye sahi hai?"
+                "expected_prompt": "Maine suna — 6123456789. Kya ye sahi hai?"
             },
             {
                 "phone": "7234567890",
                 "expected_formatted": "seven, two, three, four, five, six, seven, eight, nine, zero",
-                "expected_prompt": "Maine suna — seven, two, three, four, five, six, seven, eight, nine, zero. Kya ye sahi hai?"
+                "expected_prompt": "Maine suna — 7234567890. Kya ye sahi hai?"
             },
             {
                 "phone": "8318094577",
                 "expected_formatted": "eight, three, one, eight, zero, nine, four, five, seven, seven",
-                "expected_prompt": "Maine suna — eight, three, one, eight, zero, nine, four, five, seven, seven. Kya ye sahi hai?"
+                "expected_prompt": "Maine suna — 8318094577. Kya ye sahi hai?"
             },
             {
                 "phone": "9456789012",
                 "expected_formatted": "nine, four, five, six, seven, eight, nine, zero, one, two",
-                "expected_prompt": "Maine suna — nine, four, five, six, seven, eight, nine, zero, one, two. Kya ye sahi hai?"
+                "expected_prompt": "Maine suna — 9456789012. Kya ye sahi hai?"
             },
             {
                 "phone": "8809876543",
                 "expected_formatted": "eight, eight, zero, nine, eight, seven, six, five, four, three",
-                "expected_prompt": "Maine suna — eight, eight, zero, nine, eight, seven, six, five, four, three. Kya ye sahi hai?"
+                "expected_prompt": "Maine suna — 8809876543. Kya ye sahi hai?"
             },
             {
                 "phone": "7712345678",
                 "expected_formatted": "seven, seven, one, two, three, four, five, six, seven, eight",
-                "expected_prompt": "Maine suna — seven, seven, one, two, three, four, five, six, seven, eight. Kya ye sahi hai?"
+                "expected_prompt": "Maine suna — 7712345678. Kya ye sahi hai?"
             },
         ]
         
@@ -61,7 +61,7 @@ class TestPhoneReadbackConfirmation(unittest.TestCase):
             self.assertEqual(actual_prompt, expected_prompt)
             
             actual_disp = format_value_for_display(phone)
-            self.assertEqual(actual_disp, expected_fmt)
+            self.assertEqual(actual_disp, phone)
             
             val_res = _validate_phone(phone, {})
             self.assertTrue(val_res.is_valid)
