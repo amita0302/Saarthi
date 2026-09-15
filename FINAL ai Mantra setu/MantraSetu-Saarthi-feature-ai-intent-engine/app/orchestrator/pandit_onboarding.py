@@ -1008,8 +1008,41 @@ async def extract_field_value(user_message: str, field: str, ai_service: AIServi
         for pat in prefixes_to_strip:
             cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE).strip()
         if len(cleaned) >= 5:
-            logger.info("[PANDIT-ONBOARDING] Spoken free-text captured directly for %s: %r", field, cleaned)
+            # If text is already in Roman/English/Hinglish script, bypass LLM with 0ms overhead
+            if not any('\u0900' <= ch <= '\u097f' for ch in cleaned):
+                logger.info("[PANDIT-ONBOARDING] Spoken free-text captured directly in Roman/Hinglish for %s: %r", field, cleaned)
+                return cleaned
+
+            # If Devanagari is detected, rewrite into natural Hinglish (Roman script) using LLM
+            logger.info("[PANDIT-ONBOARDING] Devanagari bio detected: %r. Rewriting to natural Hinglish via LLM...", cleaned)
+            bio_prompt = (
+                "You are an expert Hindi-to-Hinglish transliteration assistant for a Pandit registration form.\n"
+                "The user spoke their bio in Hindi (transcribed into Devanagari script).\n"
+                "Your task is to rewrite the exact Devanagari text into natural, conversational Hinglish (Hindi written in Roman/English alphabet).\n\n"
+                "STRICT RULES:\n"
+                "1. Rewrite into natural conversational Hinglish using standard Roman spellings (e.g. 'Main ek vedic aur sanskari pandit hoon, jise sanskrit shlokon, vidhi-vidhan, aur kalash sthapana ka gehra gyan hai.').\n"
+                "2. DO NOT translate the Hindi into English (e.g. do NOT translate 'pandit hoon' to 'I am a priest'). Keep the original Hindi words in Roman script.\n"
+                "3. DO NOT summarize, shorten, rephrase, or omit any details. Preserve the exact content, vocabulary, tone, and meaning.\n"
+                "4. DO NOT use rigid character-by-character mapping (e.g. do NOT write 'Snskaree Pndit', write natural 'sanskari pandit').\n"
+                "5. Return ONLY the rewritten Hinglish text without quotes, commentary, or greetings."
+            )
+            llm_req = LLMRequest(
+                messages=[
+                    {"role": "system", "content": bio_prompt},
+                    {"role": "user", "content": cleaned}
+                ],
+                temperature=0.0,
+            )
+            try:
+                llm_resp = await asyncio.wait_for(ai_service.generate(request=llm_req), timeout=10.0)
+                if llm_resp and llm_resp.content:
+                    hinglish_bio = llm_resp.content.strip().replace('"', '').replace("'", "")
+                    logger.info("[PANDIT-ONBOARDING] Devanagari bio converted to Hinglish: %r -> %r", cleaned, hinglish_bio)
+                    return hinglish_bio
+            except Exception as e:
+                logger.error("[PANDIT-ONBOARDING] Bio Hinglish rewriting failed: %s. Falling back to cleaned text.", e)
             return cleaned
+
 
     # Deterministic Fast-Path for Specialization (pandit-spec)
     if field in ["pandit-spec", "specialization"]:
