@@ -1,6 +1,5 @@
-import React from 'react';
-import { motion, AnimatePresence, type Variants } from 'framer-motion';
-import { Sparkles, Mic } from 'lucide-react';
+import React, { useEffect, useRef } from 'react';
+import { motion, type Variants } from 'framer-motion';
 import type { SaarthiState } from './SaarthiContext';
 
 export interface SaarthiAvatarProps {
@@ -8,7 +7,18 @@ export interface SaarthiAvatarProps {
   minimized?: boolean;
   onClick?: () => void;
   className?: string;
+  isTtsPlaying?: boolean;
+  ttsPlaybackId?: number;
+  isGreetingTtsSpeaking?: boolean;
 }
+
+const avatarAssets = {
+  idle: '/assets/saarthi/idle-avatar.png',
+  greeting: '/assets/saarthi/greeting-avatar.png',
+  listening: '/assets/saarthi/listening-avatar.png',
+  thinking: '/assets/saarthi/thinking-avatar.png',
+  speaking: '/assets/saarthi/talking-avatar.webm',
+} as const;
 
 /**
  * Framer Motion Variant Map for Saarthi Digital Human Avatar Body
@@ -111,25 +121,44 @@ export const SaarthiAvatar: React.FC<SaarthiAvatarProps> = ({
   minimized = false,
   onClick,
   className = '',
+  isTtsPlaying = false,
+  ttsPlaybackId = 0,
+  isGreetingTtsSpeaking = false,
 }) => {
   const variantKey = minimized ? 'minimized' : state;
-  const size = minimized ? 64 : 140;
-
-  const getGlowShadow = () => {
-    switch (state) {
-      case 'listening':
-        return '0 0 45px rgba(52, 152, 219, 0.85), 0 0 90px rgba(238, 124, 43, 0.4)';
-      case 'speaking':
-        return '0 0 45px rgba(238, 124, 43, 0.85), 0 0 90px rgba(255, 196, 119, 0.45)';
-      case 'thinking':
-        return '0 0 35px rgba(155, 89, 182, 0.8), 0 0 70px rgba(255, 196, 119, 0.4)';
-      case 'greeting':
-      case 'namaste':
-        return '0 0 55px rgba(238, 124, 43, 0.95), 0 0 110px rgba(255, 215, 0, 0.7)';
-      default:
-        return '0 0 28px rgba(238, 124, 43, 0.45), 0 0 60px rgba(217, 102, 32, 0.2)';
-    }
+  const mediaStyle: React.CSSProperties = {
+    width: 'auto',
+    height: 'auto',
+    maxWidth: minimized ? '300px' : 'min(70vw, 320px)',
+    maxHeight: minimized ? '300px' : 'min(38vh, 420px)',
+    objectFit: 'contain',
   };
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const isTalking = state === 'speaking' || (state === 'greeting' && isGreetingTtsSpeaking);
+  const showTalkingVideo = isTalking && isTtsPlaying;
+  const imageSrc = state === 'greeting' || state === 'namaste'
+    ? avatarAssets.greeting
+    : state === 'listening'
+      ? avatarAssets.listening
+      : state === 'thinking'
+        ? avatarAssets.thinking
+        : avatarAssets.idle;
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (!isTalking || !isTtsPlaying) {
+      video.pause();
+      video.currentTime = 0;
+      return;
+    }
+
+    video.currentTime = 0;
+    void video.play().catch(() => {
+      // Playback remains safely muted; browser policy may still require a user gesture.
+    });
+  }, [isTalking, isTtsPlaying, ttsPlaybackId]);
 
   return (
     <div
@@ -138,61 +167,32 @@ export const SaarthiAvatar: React.FC<SaarthiAvatarProps> = ({
       role="button"
       tabIndex={0}
       aria-label={`Saarthi Avatar Body (${state} state)`}
-      style={{ width: size, height: size }}
     >
-      {/* Listening / Speaking Active Pulse Aura Ring */}
-      <AnimatePresence>
-        {(state === 'listening' || state === 'speaking') && (
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0.7 }}
-            animate={{ scale: [1, 1.4, 1.65], opacity: [0.7, 0.2, 0] }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }}
-            className="absolute inset-0 rounded-full border-2 border-[#ee7c2b] pointer-events-none"
-            style={{ width: size, height: size }}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Celestial Orbit Ring */}
-      <motion.div
-        animate={{ rotate: state === 'thinking' ? -360 : 360 }}
-        transition={{ duration: state === 'thinking' ? 4 : 22, repeat: Infinity, ease: 'linear' }}
-        className="absolute inset-[-1px] rounded-full border border-dashed border-[#ffc477]/30 pointer-events-none"
-      />
-
-      {/* Core Digital Human Avatar Placeholder Sphere */}
+      {/* Saarthi avatar asset shell */}
       <motion.div
         variants={saarthiAvatarVariants}
-        initial="hidden"
+        initial={variantKey === 'enter' ? 'hidden' : false}
         animate={variantKey}
-        className="relative flex items-center justify-center rounded-full overflow-hidden shadow-2xl"
-        style={{
-          width: size,
-          height: size,
-          background: 'radial-gradient(circle at 35% 30%, #ffc477 0%, #ee7c2b 48%, #8f3d14 100%)',
-          boxShadow: getGlowShadow(),
-          transition: 'box-shadow 400ms ease',
-        }}
+        className="relative flex items-center justify-center"
       >
-        {/* Sacred Om Emblem / Listening Visual */}
-        <div className="relative z-10 flex items-center justify-center text-white drop-shadow-md">
-          {state === 'listening' ? (
-            <Mic size={minimized ? 32 : 70} className="text-amber-100 animate-pulse" />
-          ) : state === 'thinking' ? (
-            <Sparkles size={minimized ? 32 : 70} className="text-amber-200" />
-          ) : (
-            <span
-              className="font-serif font-bold text-amber-50 select-none drop-shadow-xl flex items-center justify-center text-center leading-none"
-              style={{
-                fontSize: minimized ? '3rem' : '6.5rem',
-                lineHeight: 1,
-                transform: 'translateY(-2px)',
-              }}
-            >
-              ॐ
-            </span>
-          )}
+        <div className="grid place-items-center">
+          <img
+            src={imageSrc}
+            alt={`Saarthi ${state}`}
+            className={`col-start-1 row-start-1 block object-contain transition-opacity duration-150 ${showTalkingVideo ? 'opacity-0' : 'opacity-100'}`}
+            style={mediaStyle}
+          />
+          <video
+            ref={videoRef}
+            src={avatarAssets.speaking}
+            muted
+            loop
+            playsInline
+            preload="auto"
+            className={`col-start-1 row-start-1 block object-contain transition-opacity duration-150 ${showTalkingVideo ? 'opacity-100' : 'opacity-0'}`}
+            style={mediaStyle}
+            aria-label="Saarthi speaking"
+          />
         </div>
       </motion.div>
     </div>

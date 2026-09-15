@@ -95,9 +95,9 @@ export const SaarthiProvider: React.FC<SaarthiProviderProps> = ({ children }) =>
     });
 
     setState((prevState) => {
-      if (prevState === 'speaking') {
-        console.log('[Provider] Preserving active speaking state for greeting playback');
-        return 'speaking';
+      if (prevState === 'speaking' || prevState === 'greeting') {
+        console.log('[Provider] Preserving active greeting or speaking state for greeting playback');
+        return prevState;
       }
       return 'listening';
     });
