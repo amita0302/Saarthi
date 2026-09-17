@@ -408,7 +408,7 @@ export default function SignUp() {
       3: 'pandit-certFile'
     };
     const step2Fields = ['pandit-exp', 'pandit-gurukul', 'pandit-education', 'pandit-languages', 'pandit-spec', 'pandit-achievements', 'pandit-bio'];
-    const step3Fields = ['pandit-certFile', 'pandit-aadhaarFile', 'pandit-galleryFiles', 'pandit-password', 'pandit-confirm'];
+    const step3Fields = ['pandit-certFile', 'pandit-aadhaarFile', 'pandit-galleryFiles', 'pandit-password', 'pandit-confirm', 'pandit-code-of-conduct'];
 
     const currentFieldStep = step2Fields.includes(activeField) ? 2 : step3Fields.includes(activeField) ? 3 : 1;
 

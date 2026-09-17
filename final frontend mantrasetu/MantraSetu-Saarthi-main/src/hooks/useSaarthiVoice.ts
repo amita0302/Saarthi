@@ -1616,7 +1616,7 @@ export function useSaarthiVoice() {
               activeFieldRef.current = activeField;
               // ── STEP MAPPING & UI STEP SYNCHRONIZATION ──
               const step2Fields = ['pandit-exp', 'pandit-gurukul', 'pandit-education', 'pandit-languages', 'pandit-spec', 'pandit-achievements', 'pandit-bio'];
-              const step3Fields = ['pandit-certFile', 'pandit-aadhaarFile', 'pandit-galleryFiles', 'pandit-password', 'pandit-confirm'];
+              const step3Fields = ['pandit-certFile', 'pandit-aadhaarFile', 'pandit-galleryFiles', 'pandit-password', 'pandit-confirm', 'pandit-code-of-conduct'];
 
               let targetStep: 1 | 2 | 3 = 1;
               if (step2Fields.includes(activeField)) targetStep = 2;
@@ -1818,7 +1818,7 @@ export function useSaarthiVoice() {
             if (activeField) {
               activeFieldRef.current = activeField;
               const step2Fields = ['exp', 'gurukul', 'education', 'spec', 'lang', 'achievements', 'bio'];
-              const step3Fields = ['certfile', 'aadhaarfile', 'galleryfiles', 'password', 'confirm', 'codeofconduct'];
+              const step3Fields = ['certfile', 'aadhaarfile', 'galleryfiles', 'password', 'confirm', 'code-of-conduct', 'conduct'];
               
               let targetStep: 1 | 2 | 3 = 1;
               const fieldLower = activeField.toLowerCase();
